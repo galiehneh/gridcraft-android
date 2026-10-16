@@ -7,9 +7,6 @@
     <string name="opening_spreadsheet">Opening spreadsheet…</string>
     <string name="opening_spreadsheet_name">Opening spreadsheet: %1$s</string>
     <string name="open_spreadsheet_failed">Failed to process the spreadsheet file</string>
-    <string name="saved_title">Saved</string>
-    <string name="saved_message">Saved: %1$s</string>
-    <string name="saved_location_downloads">Location: Downloads folder</string>
     <string name="action_open">Open</string>
     <string name="action_share">Share</string>
     <string name="action_save_as">Save as…</string>
@@ -19,12 +16,10 @@
     <string name="save_failed">Failed to save the file</string>
     <string name="save_prepare_failed">Could not prepare temporary storage</string>
     <string name="save_write_failed">Failed to write the file (storage full?)</string>
-    <string name="save_finish_failed">Failed to finish the file</string>
     <string name="save_limit_exceeded">The file is too large to save</string>
     <string name="save_too_many">Too many saves in progress</string>
     <string name="save_downloads_failed">Failed to save to the Downloads folder</string>
     <string name="renderer_reloaded">The view was reloaded because the device ran out of memory. Unsaved documents were lost.</string>
-    <string name="exit_hint">Press again to exit</string>
     <string name="close_doc_title">Close workbook?</string>
     <string name="close_doc_message">Unsaved changes will be lost.</string>
     <string name="cancel">Cancel</string>
@@ -33,4 +28,15 @@
     <string name="app_load_failed">GridCraft failed to start.</string>
     <string name="replace_doc_title">Open another file?</string>
     <string name="print_failed">Printing is not available</string>
+    <string name="saved_to">Saved to %1$s</string>
+    <string name="saved_to_downloads">Saved to Downloads: %1$s</string>
+    <string name="action_save">Save</string>
+    <string name="discard">Discard</string>
+    <string name="menu_open_file">Open file…</string>
+    <string name="menu_undo">Undo</string>
+    <string name="menu_redo">Redo</string>
+    <string name="menu_find">Find</string>
+    <string name="menu_paste">Paste from clipboard</string>
+    <string name="clipboard_empty">Clipboard has no text</string>
+    <string name="file_too_large">File is too large (max 500 MB)</string>
 </resources>

@@ -58,4 +58,11 @@ public class FileImporterTest {
         assertTrue(msg.contains("too large"));
         assertTrue(msg.contains("500 MB"));
     }
+
+    @Test
+    public void sharedTextName_detectsTabs() {
+        assertEquals("shared.tsv", FileImporter.sharedTextName("a\tb\n1\t2"));
+        assertEquals("shared.csv", FileImporter.sharedTextName("a,b\n1,2"));
+        assertEquals("shared.csv", FileImporter.sharedTextName(null));
+    }
 }

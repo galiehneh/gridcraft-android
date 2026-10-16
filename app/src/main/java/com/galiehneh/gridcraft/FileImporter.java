@@ -103,6 +103,33 @@ class FileImporter {
                 && !(packageName + ".fileprovider").equalsIgnoreCase(authority);
     }
 
+    /** Non-empty EXTRA_TEXT of a SEND intent, or null. */
+    static String textFromIntent(Intent intent) {
+        if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return null;
+        CharSequence text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
+        return text == null || text.toString().trim().isEmpty() ? null : text.toString();
+    }
+
+    /** File name for shared text: tab-separated when it contains a tab, else comma-separated. */
+    static String sharedTextName(String text) {
+        return text != null && text.indexOf('\t') >= 0 ? "shared.tsv" : "shared.csv";
+    }
+
+    /** Writes shared text into cacheDir/docs/<id>.<ext> and returns the new id. Blocking I/O. */
+    String writeText(String text, String name) throws IOException {
+        File dir = new File(context.getCacheDir(), DOCS_DIR);
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Cannot create " + dir);
+        String id = UUID.randomUUID().toString();
+        File dest = docFile(id, name);
+        try (FileOutputStream fos = new FileOutputStream(dest)) {
+            fos.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            if (!dest.delete() && dest.exists()) dest.deleteOnExit();
+            throw e;
+        }
+        return id;
+    }
+
     /** Appends an extension inferred from mime when name has no valid one. */
     static String withInferredExtension(String name, String mime) {
         if (Mime.extensionOf(name) != null) return name;

@@ -2,7 +2,10 @@ package com.galiehneh.gridcraft;
 
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.UriPermission;
 import android.content.res.Configuration;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -11,11 +14,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Process;
 import android.os.SystemClock;
 import android.print.PrintManager;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -31,6 +36,7 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -40,7 +46,10 @@ import androidx.activity.EdgeToEdge;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.content.pm.ShortcutInfoCompat;
+import androidx.core.content.pm.ShortcutManagerCompat;
 import androidx.core.graphics.Insets;
+import androidx.core.graphics.drawable.IconCompat;
 import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -49,8 +58,14 @@ import androidx.webkit.WebViewAssetLoader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -69,6 +84,18 @@ public class MainActivity extends ComponentActivity {
     private static final String STATE_SAVE_AS_NAME = "saveAsName";
     private static final String STATE_SAVE_AS_MIME = "saveAsMime";
     private static final String STATE_SAVE_AS_INITIAL = "saveAsInitial";
+    private static final String STATE_SOURCE_URI = "sourceUri";
+    private static final long AFTER_SAVE_TIMEOUT_MS = 15000;
+    private static final int SHORTCUT_COUNT = 3;
+    private static final String FAB_MENU_LABEL = "\u22EE";
+    private static final int MENU_OPEN = 1;
+    private static final int MENU_SAVE = 2;
+    private static final int MENU_UNDO = 3;
+    private static final int MENU_REDO = 4;
+    private static final int MENU_FIND = 5;
+    private static final int MENU_PASTE = 6;
+    private static final int MENU_CLOSE = 7;
+    private static final int MENU_RECENT_BASE = 100;
 
     private static final String[] SPREADSHEET_MIMES = {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -90,6 +117,10 @@ public class MainActivity extends ComponentActivity {
     private String currentDocumentId = null;
     private String currentDocumentName = null;
     private boolean dirty;
+    private volatile Source source;
+    private Runnable afterSave;
+    private RecentFiles recents;
+    private SaveBar saveBar;
     private boolean importing;
     private boolean splashHeld = true;
     private TextView fab;
@@ -102,6 +133,7 @@ public class MainActivity extends ComponentActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable hideOverlay = () -> setOverlayVisible(false);
     private final Runnable releaseSplash = () -> splashHeld = false;
+    private final Runnable clearAfterSave = () -> afterSave = null;
     private View loadingOverlay;
     private View loadingProgress;
     private TextView loadingText;
@@ -113,11 +145,22 @@ public class MainActivity extends ComponentActivity {
     private final ActivityResultLauncher<Intent> directPickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(), r -> {
                 Uri uri = r.getResultCode() == RESULT_OK && r.getData() != null ? r.getData().getData() : null;
-                if (uri != null) handleSpreadsheetUri(uri);
+                if (uri != null) replaceDocument(() -> handleSpreadsheetUri(uri));
             });
 
     private final ActivityResultLauncher<Intent> saveAsLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(), r -> onSaveAsResult(r.getResultCode(), r.getData()));
+
+    /** Content URI the open document was imported from; saves of the same type overwrite it. */
+    private static final class Source {
+        final Uri uri;
+        final String ext;
+
+        Source(Uri uri, String ext) {
+            this.uri = uri;
+            this.ext = ext;
+        }
+    }
 
     private AndroidBridge.SavedFile pendingSaveAs;
     private boolean pendingSaveAsInitial;
@@ -142,6 +185,9 @@ public class MainActivity extends ComponentActivity {
         fab = createFabButton();
         rootLayout.addView(fab);
 
+        saveBar = new SaveBar(this);
+        rootLayout.addView(saveBar);
+
         loadingOverlay = createLoadingOverlay();
         rootLayout.addView(loadingOverlay);
 
@@ -150,6 +196,7 @@ public class MainActivity extends ComponentActivity {
 
         importer = new FileImporter(this);
         fileSaver = new FileSaver(this);
+        recents = new RecentFiles(this);
         configureWebView();
 
         backCallback = new OnBackPressedCallback(false) {
@@ -182,22 +229,28 @@ public class MainActivity extends ComponentActivity {
 
     private void handleIncomingIntent(Intent intent) {
         Uri targetUri = importer.uriFromIntent(intent);
-        if (targetUri == null) {
-            if (!isDocumentOpen()) loadUrlWithOverlay(BASE_URL);
-        } else if (dirty && isDocumentOpen()) {
-            confirmReplaceDocument(targetUri);
-        } else {
-            handleSpreadsheetUri(targetUri);
+        String text = targetUri == null ? FileImporter.textFromIntent(intent) : null;
+        if (targetUri != null) {
+            replaceDocument(() -> handleSpreadsheetUri(targetUri));
+        } else if (text != null) {
+            replaceDocument(() -> handleSharedText(text));
+        } else if (!isDocumentOpen()) {
+            loadUrlWithOverlay(BASE_URL);
         }
     }
 
-    private void confirmReplaceDocument(Uri uri) {
+    /** Runs {@code open} now, or after confirmation when the current document has unsaved changes. */
+    private void replaceDocument(Runnable open) {
+        if (!dirty || !isDocumentOpen()) {
+            open.run();
+            return;
+        }
         if (isFinishing() || isDestroyed()) return;
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.replace_doc_title))
                 .setMessage(getString(R.string.close_doc_message))
                 .setNegativeButton(getString(R.string.cancel), null)
-                .setPositiveButton(getString(R.string.action_open), (d, w) -> handleSpreadsheetUri(uri))
+                .setPositiveButton(getString(R.string.action_open), (d, w) -> open.run())
                 .show();
     }
 
@@ -213,6 +266,8 @@ public class MainActivity extends ComponentActivity {
             outState.putString(STATE_SAVE_AS_MIME, pending.mime);
             outState.putBoolean(STATE_SAVE_AS_INITIAL, pendingSaveAsInitial);
         }
+        Source src = source;
+        if (src != null) outState.putString(STATE_SOURCE_URI, src.uri.toString());
     }
 
     private void restoreInstanceState(Bundle state) {
@@ -225,6 +280,9 @@ public class MainActivity extends ComponentActivity {
         }
         currentDocumentId = state.getString(STATE_DOC_ID);
         currentDocumentName = state.getString(STATE_DOC_NAME);
+        String sourceUri = state.getString(STATE_SOURCE_URI);
+        String ext = Mime.extensionOf(currentDocumentName);
+        source = sourceUri != null && ext != null ? new Source(Uri.parse(sourceUri), ext) : null;
         reloadCurrent();
     }
 
@@ -324,6 +382,7 @@ public class MainActivity extends ComponentActivity {
         webView = null;
         mainHandler.removeCallbacks(hideOverlay);
         mainHandler.removeCallbacks(releaseSplash);
+        mainHandler.removeCallbacks(clearAfterSave);
         if (bridge != null) bridge.close();
         saveExecutor.shutdown();
         importExecutor.shutdown();
@@ -378,7 +437,7 @@ public class MainActivity extends ComponentActivity {
         button.setFocusable(true);
         button.setOnClickListener(v -> {
             v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
-            openDirectSpreadsheetPicker();
+            onFabClick(v);
         });
         return button;
     }
@@ -548,7 +607,10 @@ public class MainActivity extends ComponentActivity {
 
     private boolean launchPicker(ActivityResultLauncher<Intent> launcher, String[] accept, boolean multiple) {
         try {
-            launcher.launch(FileImporter.pickIntent(Intent.ACTION_OPEN_DOCUMENT, accept, multiple));
+            launcher.launch(FileImporter.pickIntent(Intent.ACTION_OPEN_DOCUMENT, accept, multiple)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION));
             return true;
         } catch (ActivityNotFoundException e) {
             try {
@@ -625,9 +687,7 @@ public class MainActivity extends ComponentActivity {
 
         @Override
         public void onDocumentOpened(boolean opened) {
-            if (fab != null) {
-                fab.setVisibility(opened ? View.GONE : View.VISIBLE);
-            }
+            updateFab();
         }
 
         @Override
@@ -643,33 +703,166 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void handleSpreadsheetUri(Uri uri) {
+        boolean persisted = persistPermission(uri);
+        startImport(() -> {
+            String name = importer.displayName(uri);
+            return new Imported(importer.copyToCache(uri, name), name, uri, persisted);
+        });
+    }
+
+    private void handleSharedText(String text) {
+        startImport(() -> {
+            String name = FileImporter.sharedTextName(text);
+            return new Imported(importer.writeText(text, name), name, null, false);
+        });
+    }
+
+    private interface ImportTask {
+        Imported run() throws IOException;
+    }
+
+    private record Imported(String id, String name, Uri source, boolean persisted) {}
+
+    private void startImport(ImportTask task) {
         importing = true;
         setOverlayVisible(true);
         loadingText.setText(getString(R.string.opening_spreadsheet));
         importExecutor.execute(() -> {
             try {
-                String name = importer.displayName(uri);
-                String id = importer.copyToCache(uri, name);
-                importer.cleanup(id);
-                runOnUiThread(() -> onImported(id, name));
+                Imported done = task.run();
+                importer.cleanup(done.id());
+                runOnUiThread(() -> onImported(done));
             } catch (IOException | RuntimeException e) {
-                Log.e(TAG, "Error handling spreadsheet URI: " + uri, e);
+                Log.e(TAG, "Import failed", e);
+                int message = e instanceof FileImporter.FileTooLargeException
+                        ? R.string.file_too_large : R.string.open_spreadsheet_failed;
                 runOnUiThread(() -> {
                     importing = false;
                     setOverlayVisible(false);
                     if (webView != null && webView.getUrl() == null) loadUrlWithOverlay(BASE_URL);
-                    Toast.makeText(this, getString(R.string.open_spreadsheet_failed), Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, getString(message), Toast.LENGTH_SHORT).show();
                 });
             }
         });
     }
 
-    private void onImported(String id, String name) {
+    /** Keeps read (and write when granted) access to the source across restarts; false when unavailable. */
+    private boolean persistPermission(Uri uri) {
+        int read = Intent.FLAG_GRANT_READ_URI_PERMISSION;
+        try {
+            getContentResolver().takePersistableUriPermission(uri, read | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            return true;
+        } catch (SecurityException | IllegalArgumentException e) {
+            try {
+                getContentResolver().takePersistableUriPermission(uri, read);
+                return true;
+            } catch (SecurityException | IllegalArgumentException ex) {
+                return persistedReadUris().contains(uri.toString());
+            }
+        }
+    }
+
+    private Set<String> persistedReadUris() {
+        Set<String> uris = new HashSet<>();
+        for (UriPermission p : getContentResolver().getPersistedUriPermissions()) {
+            if (p.isReadPermission()) uris.add(p.getUri().toString());
+        }
+        return uris;
+    }
+
+    private void onImported(Imported done) {
         importing = false;
         if (isFinishing() || isDestroyed() || webView == null) return;
-        openDocument(id, name);
+        String ext = Mime.extensionOf(done.name());
+        source = done.source() != null && ext != null ? new Source(done.source(), ext) : null;
+        if (done.persisted() && done.source() != null) {
+            updateShortcuts(recents.add(done.source().toString(), done.name()));
+        }
+        openDocument(done.id(), done.name());
         getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
-        Toast.makeText(this, getString(R.string.opening_spreadsheet_name, name), Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, getString(R.string.opening_spreadsheet_name, done.name()), Toast.LENGTH_SHORT).show();
+    }
+
+    private void updateShortcuts(List<RecentFiles.Entry> entries) {
+        try {
+            int max = Math.min(SHORTCUT_COUNT, ShortcutManagerCompat.getMaxShortcutCountPerActivity(this));
+            List<ShortcutInfoCompat> shortcuts = new ArrayList<>();
+            for (int i = 0; i < entries.size() && i < max; i++) {
+                RecentFiles.Entry e = entries.get(i);
+                Intent view = new Intent(this, MainActivity.class)
+                        .setAction(Intent.ACTION_VIEW)
+                        .setData(Uri.parse(e.uri()));
+                shortcuts.add(new ShortcutInfoCompat.Builder(this, "recent-" + Integer.toHexString(e.uri().hashCode()))
+                        .setShortLabel(e.name())
+                        .setIcon(IconCompat.createWithResource(this, R.mipmap.ic_launcher))
+                        .setIntent(view)
+                        .build());
+            }
+            ShortcutManagerCompat.setDynamicShortcuts(this, shortcuts);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Cannot update shortcuts", e);
+        }
+    }
+
+    private void updateFab() {
+        if (fab != null) fab.setText(isDocumentOpen() ? FAB_MENU_LABEL : getString(R.string.open_spreadsheet));
+    }
+
+    private void onFabClick(View anchor) {
+        List<RecentFiles.Entry> entries = recents.prune(persistedReadUris());
+        if (!isDocumentOpen() && entries.isEmpty()) {
+            openDirectSpreadsheetPicker();
+            return;
+        }
+        PopupMenu popup = new PopupMenu(this, anchor);
+        Menu menu = popup.getMenu();
+        if (isDocumentOpen()) {
+            menu.add(Menu.NONE, MENU_SAVE, Menu.NONE, R.string.action_save);
+            menu.add(Menu.NONE, MENU_UNDO, Menu.NONE, R.string.menu_undo);
+            menu.add(Menu.NONE, MENU_REDO, Menu.NONE, R.string.menu_redo);
+            menu.add(Menu.NONE, MENU_FIND, Menu.NONE, R.string.menu_find);
+            menu.add(Menu.NONE, MENU_PASTE, Menu.NONE, R.string.menu_paste);
+            menu.add(Menu.NONE, MENU_CLOSE, Menu.NONE, R.string.close);
+        }
+        menu.add(Menu.NONE, MENU_OPEN, Menu.NONE, R.string.menu_open_file);
+        for (int i = 0; i < entries.size(); i++) {
+            menu.add(Menu.NONE, MENU_RECENT_BASE + i, Menu.NONE, entries.get(i).name());
+        }
+        popup.setOnMenuItemClickListener(item -> onMenuItem(item.getItemId(), entries));
+        popup.show();
+    }
+
+    private boolean onMenuItem(int id, List<RecentFiles.Entry> entries) {
+        switch (id) {
+            case MENU_OPEN: replaceDocument(this::openDirectSpreadsheetPicker); break;
+            case MENU_SAVE: evalHost("gcKey('ctrl+s')"); break;
+            case MENU_UNDO: evalHost("gcKey('ctrl+z')"); break;
+            case MENU_REDO: evalHost("gcKey('ctrl+y')"); break;
+            case MENU_FIND: evalHost("gcKey('ctrl+f')"); break;
+            case MENU_PASTE: pasteFromClipboard(); break;
+            case MENU_CLOSE: requestCloseDocument(); break;
+            default:
+                int index = id - MENU_RECENT_BASE;
+                if (index < 0 || index >= entries.size()) return false;
+                Uri uri = Uri.parse(entries.get(index).uri());
+                replaceDocument(() -> handleSpreadsheetUri(uri));
+        }
+        return true;
+    }
+
+    private void evalHost(String script) {
+        if (webView != null) webView.evaluateJavascript("window." + script, null);
+    }
+
+    private void pasteFromClipboard() {
+        ClipboardManager clipboard = getSystemService(ClipboardManager.class);
+        ClipData clip = clipboard != null ? clipboard.getPrimaryClip() : null;
+        CharSequence text = clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).coerceToText(this) : null;
+        if (text == null || text.length() == 0) {
+            Toast.makeText(this, getString(R.string.clipboard_empty), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        evalHost("gcPaste(" + JSONObject.quote(text.toString()) + ")");
     }
 
     private void openDocument(String id, String name) {
@@ -677,7 +870,7 @@ public class MainActivity extends ComponentActivity {
         currentDocumentName = name;
         dirty = false;
         updateBackCallback();
-        if (fab != null) fab.setVisibility(View.GONE);
+        updateFab();
         String file = Uri.encode("/doc/" + id + "/" + Uri.encode(name));
         loadUrlWithOverlay(BASE_URL + "?file=" + file + "&t=" + System.currentTimeMillis());
     }
@@ -687,7 +880,8 @@ public class MainActivity extends ComponentActivity {
         currentDocumentName = null;
         dirty = false;
         updateBackCallback();
-        if (fab != null) fab.setVisibility(View.VISIBLE);
+        source = null;
+        updateFab();
         if (webView != null) {
             loadUrlWithOverlay(BASE_URL);
             webView.clearHistory();
@@ -697,7 +891,12 @@ public class MainActivity extends ComponentActivity {
     private final AndroidBridge.SaveListener saveListener = new AndroidBridge.SaveListener() {
         @Override
         public void onSaved(AndroidBridge.SavedFile file, String finalName) {
-            runOnUiThread(() -> onSaveSucceeded(file, finalName, true));
+            runOnUiThread(() -> onSaveSucceeded(file, getString(R.string.saved_to_downloads, finalName)));
+        }
+
+        @Override
+        public boolean onSaveInPlace(AndroidBridge.SavedFile file) {
+            return saveInPlace(file);
         }
 
         @Override
@@ -727,22 +926,49 @@ public class MainActivity extends ComponentActivity {
         printManager.print(job, new PdfPrintAdapter(file.file, job), null);
     }
 
-    private void onSaveSucceeded(AndroidBridge.SavedFile file, String name, boolean inDownloads) {
-        if (isFinishing() || isDestroyed()) return;
-        getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
-        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.saved_title))
-                .setMessage(getString(R.string.saved_message, name)
-                        + (inDownloads ? "\n" + getString(R.string.saved_location_downloads) : ""))
-                .setNeutralButton(getString(R.string.action_share), (d, w) -> startSaveAction(SaveActions.share(this, file.file, file.mime)))
-                .setNegativeButton(getString(R.string.action_save_as), (d, w) -> launchSaveAs(file, false));
-        if (!Mime.isOctetStream(file.mime)) {
-            dialog.setPositiveButton(getString(R.string.action_open), (d, w) -> startSaveAction(SaveActions.view(this, file.file, file.mime)));
+    /** Overwrites the document's source file when the saved type matches and write access remains. */
+    private boolean saveInPlace(AndroidBridge.SavedFile file) {
+        Source src = source;
+        if (src == null || !src.ext.equals(Mime.extensionOf(file.name))) return false;
+        if (checkUriPermission(src.uri, Process.myPid(), Process.myUid(),
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return false;
         }
-        dialog.show();
+        try {
+            fileSaver.overwrite(file.file, src.uri);
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "In-place save failed, falling back", e);
+            return false;
+        }
+        String name = fileSaver.displayName(src.uri);
+        String shown = name != null ? name : file.name;
+        runOnUiThread(() -> onSaveSucceeded(file, getString(R.string.saved_to, shown)));
+        return true;
+    }
+
+    private void onSaveSucceeded(AndroidBridge.SavedFile file, String message) {
+        if (isFinishing() || isDestroyed()) return;
+        Runnable then = afterSave;
+        afterSave = null;
+        mainHandler.removeCallbacks(clearAfterSave);
+        if (then != null) {
+            then.run();
+            return;
+        }
+        getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        List<SaveBar.Action> actions = new ArrayList<>();
+        if (!Mime.isOctetStream(file.mime)) {
+            actions.add(new SaveBar.Action(getString(R.string.action_open),
+                    () -> startSaveAction(SaveActions.view(this, file.file, file.mime))));
+        }
+        actions.add(new SaveBar.Action(getString(R.string.action_share),
+                () -> startSaveAction(SaveActions.share(this, file.file, file.mime))));
+        actions.add(new SaveBar.Action(getString(R.string.action_save_as), () -> launchSaveAs(file, false)));
+        saveBar.show(message, actions.toArray(new SaveBar.Action[0]));
     }
 
     private void onSaveFailed(String name, String message) {
+        afterSave = null;
         if (isFinishing() || isDestroyed()) return;
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
@@ -786,7 +1012,7 @@ public class MainActivity extends ComponentActivity {
             try {
                 fileSaver.saveToUri(file.file, targetUri);
                 String name = fileSaver.displayName(targetUri);
-                runOnUiThread(() -> onSaveSucceeded(file, name != null ? name : file.name, false));
+                runOnUiThread(() -> onSaveSucceeded(file, getString(R.string.saved_to, name != null ? name : file.name)));
             } catch (IOException | RuntimeException e) {
                 Log.e(TAG, "saveToUri failed", e);
                 runOnUiThread(() -> onSaveFailed(file.name, getString(R.string.save_failed)));
@@ -801,13 +1027,17 @@ public class MainActivity extends ComponentActivity {
         long now = SystemClock.uptimeMillis();
         if (backPressedTime != 0 && now - backPressedTime < BACK_CLOSE_WINDOW_MS) {
             backPressedTime = 0;
-            if (dirty) {
-                confirmCloseDocument();
-            } else {
-                closeDocument();
-            }
+            requestCloseDocument();
         } else {
             backPressedTime = now;
+        }
+    }
+
+    private void requestCloseDocument() {
+        if (dirty) {
+            confirmCloseDocument();
+        } else {
+            closeDocument();
         }
     }
 
@@ -816,8 +1046,17 @@ public class MainActivity extends ComponentActivity {
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.close_doc_title))
                 .setMessage(getString(R.string.close_doc_message))
-                .setNegativeButton(getString(R.string.cancel), null)
-                .setPositiveButton(getString(R.string.close), (d, w) -> closeDocument())
+                .setPositiveButton(getString(R.string.action_save), (d, w) -> saveThenClose())
+                .setNegativeButton(getString(R.string.discard), (d, w) -> closeDocument())
+                .setNeutralButton(getString(R.string.cancel), null)
                 .show();
+    }
+
+    /** Triggers the app's Ctrl+S; the document closes once the resulting save succeeds. */
+    private void saveThenClose() {
+        afterSave = this::closeDocument;
+        mainHandler.removeCallbacks(clearAfterSave);
+        mainHandler.postDelayed(clearAfterSave, AFTER_SAVE_TIMEOUT_MS);
+        evalHost("gcKey('ctrl+s')");
     }
 }

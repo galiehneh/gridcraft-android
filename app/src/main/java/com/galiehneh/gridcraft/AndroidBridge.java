@@ -76,6 +76,8 @@ class AndroidBridge {
     /** Save callbacks; may be invoked on any thread. */
     interface SaveListener {
         void onSaved(SavedFile file, String finalName);
+        /** Tries to overwrite the document's source file; true when handled (success UI included). */
+        boolean onSaveInPlace(SavedFile file);
         void onNeedsDestination(SavedFile file);
         void onPrint(SavedFile file);
         void onFailed(String name, String message);
@@ -196,6 +198,7 @@ class AndroidBridge {
     }
 
     private void deliver(SavedFile saved) throws IOException {
+        if (saveListener.onSaveInPlace(saved)) return;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             saveListener.onNeedsDestination(saved);
             return;

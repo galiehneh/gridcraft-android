@@ -77,6 +77,11 @@ class FileSaver {
         }
     }
 
+    /** Overwrites an existing SAF document in place ("wt"); never deletes it, even on failure. */
+    void overwrite(File src, Uri uri) throws IOException {
+        copy(src, uri);
+    }
+
     private long sizeOf(Uri uri) {
         try (Cursor c = context.getContentResolver()
                 .query(uri, new String[]{OpenableColumns.SIZE}, null, null, null)) {

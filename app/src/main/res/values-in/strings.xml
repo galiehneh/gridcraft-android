@@ -7,9 +7,6 @@
     <string name="opening_spreadsheet">Membuka lembar sebar…</string>
     <string name="opening_spreadsheet_name">Membuka lembar sebar: %1$s</string>
     <string name="open_spreadsheet_failed">Gagal memproses berkas lembar sebar</string>
-    <string name="saved_title">Tersimpan</string>
-    <string name="saved_message">Tersimpan: %1$s</string>
-    <string name="saved_location_downloads">Lokasi: folder Download</string>
     <string name="action_open">Buka</string>
     <string name="action_share">Bagikan</string>
     <string name="action_save_as">Simpan sebagai…</string>
@@ -19,12 +16,10 @@
     <string name="save_failed">Gagal menyimpan berkas</string>
     <string name="save_prepare_failed">Tidak dapat menyiapkan penyimpanan sementara</string>
     <string name="save_write_failed">Gagal menulis berkas (penyimpanan penuh?)</string>
-    <string name="save_finish_failed">Gagal menyelesaikan berkas</string>
     <string name="save_limit_exceeded">Berkas terlalu besar untuk disimpan</string>
     <string name="save_too_many">Terlalu banyak penyimpanan yang berjalan</string>
     <string name="save_downloads_failed">Gagal menyimpan ke folder Download</string>
     <string name="renderer_reloaded">Tampilan dimuat ulang karena kehabisan memori. Dokumen yang belum disimpan hilang.</string>
-    <string name="exit_hint">Tekan sekali lagi untuk keluar</string>
     <string name="close_doc_title">Tutup lembar kerja?</string>
     <string name="close_doc_message">Perubahan yang belum disimpan akan hilang.</string>
     <string name="cancel">Batal</string>
@@ -33,4 +28,15 @@
     <string name="app_load_failed">GridCraft gagal dimulai.</string>
     <string name="replace_doc_title">Buka file lain?</string>
     <string name="print_failed">Pencetakan tidak tersedia</string>
+    <string name="saved_to">Tersimpan ke %1$s</string>
+    <string name="saved_to_downloads">Tersimpan di Download: %1$s</string>
+    <string name="action_save">Simpan</string>
+    <string name="discard">Buang</string>
+    <string name="menu_open_file">Buka file…</string>
+    <string name="menu_undo">Urungkan</string>
+    <string name="menu_redo">Ulangi</string>
+    <string name="menu_find">Cari</string>
+    <string name="menu_paste">Tempel dari clipboard</string>
+    <string name="clipboard_empty">Clipboard tidak berisi teks</string>
+    <string name="file_too_large">Berkas terlalu besar (maks 500 MB)</string>
 </resources>

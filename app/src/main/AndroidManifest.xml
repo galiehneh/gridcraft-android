@@ -2,8 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <application
         android:allowBackup="true"
@@ -22,6 +20,7 @@
             android:configChanges="uiMode|density|fontScale|keyboard|keyboardHidden|navigation|locale|layoutDirection|screenLayout|smallestScreenSize|orientation|screenSize"
             android:exported="true"
             android:launchMode="singleTask"
+            android:theme="@style/Theme.GridCraft.Starting"
             android:windowSoftInputMode="adjustResize">
 
             <intent-filter>
@@ -35,7 +34,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="content" />
-                <data android:scheme="file" />
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
                 <data android:mimeType="application/vnd.ms-excel" />
                 <data android:mimeType="application/vnd.ms-excel.sheet.macroEnabled.12" />
@@ -45,7 +43,6 @@
                 <data android:mimeType="text/tab-separated-values" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/json" />
-                <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
             <!-- Intent filter: Open spreadsheets via File Extension -->
@@ -54,7 +51,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="content" />
-                <data android:scheme="file" />
                 <data android:host="*" />
                 <data android:pathPattern=".*\\.xlsx" />
                 <data android:pathPattern=".*\\..*\\.xlsx" />

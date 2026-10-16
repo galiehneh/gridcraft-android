@@ -29,4 +29,8 @@
     <string name="close_doc_message">Unsaved changes will be lost.</string>
     <string name="cancel">Cancel</string>
     <string name="close">Close</string>
+    <string name="retry">Reload</string>
+    <string name="app_load_failed">GridCraft failed to start.</string>
+    <string name="replace_doc_title">Open another file?</string>
+    <string name="print_failed">Printing is not available</string>
 </resources>

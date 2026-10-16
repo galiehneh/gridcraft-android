@@ -44,15 +44,26 @@ class FileImporter {
         return DOC_ID.matcher(id).matches() ? id : null;
     }
 
-    File docFile(String id, String name) {
-        String ext = "xlsx";
-        if (name != null) {
-            int dot = name.lastIndexOf('.');
-            if (dot > 0 && dot < name.length() - 1) {
-                ext = name.substring(dot + 1).toLowerCase();
-            }
+    /** Thrown when an import exceeds {@link #MAX_IMPORT_BYTES}. */
+    static final class FileTooLargeException extends IOException {
+        FileTooLargeException(long limitBytes) {
+            super("File too large (limit " + (limitBytes / (1024 * 1024)) + " MB)");
         }
-        return new File(new File(context.getCacheDir(), DOCS_DIR), id + "." + ext);
+    }
+
+    /**
+     * Cache file for a document. Extension comes from name; when name has no valid extension,
+     * an existing {@code <id>.*} file is used, else xlsx.
+     */
+    File docFile(String id, String name) {
+        File dir = new File(context.getCacheDir(), DOCS_DIR);
+        String ext = Mime.extensionOf(name);
+        if (ext == null) {
+            File[] matches = dir.listFiles((d, n) -> n.startsWith(id + "."));
+            if (matches != null && matches.length > 0) return matches[0];
+            ext = "xlsx";
+        }
+        return new File(dir, id + "." + ext);
     }
 
     static boolean isIncomingAction(Intent intent) {
@@ -80,14 +91,23 @@ class FileImporter {
         return isAllowedSource(uri) ? uri : null;
     }
 
-    /** Only content:// and file:// URIs, and never this app's own FileProvider. */
+    /** Only content:// URIs, and never this app's own FileProvider. file:// is rejected. */
     boolean isAllowedSource(Uri uri) {
         if (uri == null) return false;
-        String scheme = uri.getScheme();
-        if ("content".equalsIgnoreCase(scheme)) {
-            return !(context.getPackageName() + ".fileprovider").equalsIgnoreCase(uri.getAuthority());
-        }
-        return "file".equalsIgnoreCase(scheme);
+        return isAllowedSource(uri.getScheme(), uri.getAuthority(), context.getPackageName());
+    }
+
+    /** Pure form of {@link #isAllowedSource(Uri)}. */
+    static boolean isAllowedSource(String scheme, String authority, String packageName) {
+        return "content".equalsIgnoreCase(scheme)
+                && !(packageName + ".fileprovider").equalsIgnoreCase(authority);
+    }
+
+    /** Appends an extension inferred from mime when name has no valid one. */
+    static String withInferredExtension(String name, String mime) {
+        if (Mime.extensionOf(name) != null) return name;
+        String ext = Mime.extensionForMime(mime);
+        return ext == null ? name : name + "." + ext;
     }
 
     /** Result of a chooser pick: single data URI or all clip items; null when nothing picked. */
@@ -122,7 +142,7 @@ class FileImporter {
             long total = 0;
             while ((read = is.read(buffer)) != -1) {
                 total += read;
-                if (total > MAX_IMPORT_BYTES) throw new IOException("File too large");
+                if (total > MAX_IMPORT_BYTES) throw new FileTooLargeException(MAX_IMPORT_BYTES);
                 fos.write(buffer, 0, read);
             }
         } catch (IOException | RuntimeException e) {
@@ -156,14 +176,9 @@ class FileImporter {
                     }
                 }
             } catch (Exception ignored) {}
-        } else {
-            String path = uri.getPath();
-            if (path != null) {
-                int cut = path.lastIndexOf('/');
-                if (cut != -1) {
-                    result = path.substring(cut + 1);
-                }
-            }
+            try {
+                result = withInferredExtension(result, context.getContentResolver().getType(uri));
+            } catch (Exception ignored) {}
         }
         return result;
     }

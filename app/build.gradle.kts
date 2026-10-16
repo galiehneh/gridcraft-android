@@ -14,14 +14,14 @@ val signingProperties = Properties().apply {
 
 android {
     namespace = "com.galiehneh.gridcraft"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.galiehneh.gridcraft"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 20261017
-        versionName = "2026.10.16.1"
+        targetSdk = 36
+        versionCode = 2026101701
+        versionName = "2026.10.17"
     }
 
     signingConfigs {
@@ -32,7 +32,6 @@ android {
                 storePassword = signingProperties.getProperty("storePassword")
                 keyAlias = signingProperties.getProperty("keyAlias")
                 keyPassword = signingProperties.getProperty("keyPassword")
-                enableV1Signing = true
                 enableV2Signing = true
             }
         }
@@ -44,7 +43,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             if (signingPropertiesFile.isFile) {
                 signingConfig = signingConfigs.getByName("release")
             }

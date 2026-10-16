@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Pure-Java helpers: extension to MIME mapping and file-name sanitising. */
 final class Mime {
@@ -29,7 +30,29 @@ final class Mime {
     private static final Set<String> SAFE_EXTENSIONS = new HashSet<>(Arrays.asList(
             "xlsx", "xls", "xlsm", "xlsb", "ods", "csv", "tsv", "txt", "json", "pdf", "png", "jpg", "jpeg", "zip"));
 
+    private static final Pattern EXTENSION = Pattern.compile("[a-z0-9]{1,5}");
+
     private Mime() {}
+
+    /** True when ext (no dot) is 1-5 lowercase ASCII letters or digits. */
+    static boolean isValidExtension(String ext) {
+        return ext != null && EXTENSION.matcher(ext).matches();
+    }
+
+    /** Lowercased, validated extension of a file name or path; null when absent or invalid. */
+    static String extensionOf(String name) {
+        if (name == null) return null;
+        int dot = name.lastIndexOf('.');
+        if (dot <= 0 || dot >= name.length() - 1) return null;
+        String ext = name.substring(dot + 1).toLowerCase(Locale.US);
+        return isValidExtension(ext) ? ext : null;
+    }
+
+    /** Extension for a MIME type (parameters ignored, case-insensitive); null when unknown. */
+    static String extensionForMime(String mime) {
+        if (mime == null) return null;
+        return extensionFor(mime.split(";", 2)[0].trim().toLowerCase(Locale.US));
+    }
 
     static boolean isOctetStream(String mime) {
         return OCTET_STREAM.equals(mime);

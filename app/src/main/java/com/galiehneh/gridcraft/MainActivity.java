@@ -11,6 +11,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.print.PrintManager;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -19,14 +21,14 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
-import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
-import android.webkit.WebHistoryItem;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -39,6 +41,7 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.graphics.Insets;
+import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.WebViewAssetLoader;
@@ -46,7 +49,7 @@ import androidx.webkit.WebViewAssetLoader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -55,8 +58,17 @@ public class MainActivity extends ComponentActivity {
     private static final String TAG = "GridCraft";
     private static final String HOST = "appassets.androidplatform.net";
     private static final String ORIGIN = "https://" + HOST;
-    private static final String BASE_URL = ORIGIN + "/index.html";
+    private static final String BASE_URL = ORIGIN + "/android/host.html";
     private static final long OVERLAY_TIMEOUT_MS = 15000;
+    private static final long PAGE_FINISHED_FALLBACK_MS = 8000;
+    private static final long SPLASH_MAX_MS = 2000;
+    private static final long BACK_CLOSE_WINDOW_MS = 2000;
+    private static final String STATE_DOC_ID = "docId";
+    private static final String STATE_DOC_NAME = "docName";
+    private static final String STATE_SAVE_AS_FILE = "saveAsFile";
+    private static final String STATE_SAVE_AS_NAME = "saveAsName";
+    private static final String STATE_SAVE_AS_MIME = "saveAsMime";
+    private static final String STATE_SAVE_AS_INITIAL = "saveAsInitial";
 
     private static final String[] SPREADSHEET_MIMES = {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -75,19 +87,25 @@ public class MainActivity extends ComponentActivity {
     private WebViewAssetLoader assetLoader;
     private FileImporter importer;
     private ValueCallback<Uri[]> filePathCallback;
+    private String currentDocumentId = null;
     private String currentDocumentName = null;
+    private boolean dirty;
+    private boolean importing;
+    private boolean splashHeld = true;
     private TextView fab;
     private long backPressedTime = 0;
-    private Toast exitToast = null;
+    private OnBackPressedCallback backCallback;
     private FileSaver fileSaver;
     private AndroidBridge bridge;
-    private boolean paused;
     private final ExecutorService saveExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService importExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable hideOverlay = () -> setOverlayVisible(false);
+    private final Runnable releaseSplash = () -> splashHeld = false;
     private View loadingOverlay;
+    private View loadingProgress;
     private TextView loadingText;
+    private Button retryButton;
 
     private final ActivityResultLauncher<Intent> chooserLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(), r -> onChooserResult(r.getResultCode(), r.getData()));
@@ -106,8 +124,10 @@ public class MainActivity extends ComponentActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        SplashScreen.installSplashScreen(this).setKeepOnScreenCondition(() -> splashHeld);
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
+        mainHandler.postDelayed(releaseSplash, SPLASH_MAX_MS);
 
         rootLayout = new FrameLayout(this);
         rootLayout.setLayoutParams(new ViewGroup.LayoutParams(
@@ -132,24 +152,21 @@ public class MainActivity extends ComponentActivity {
         fileSaver = new FileSaver(this);
         configureWebView();
 
-        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+        backCallback = new OnBackPressedCallback(false) {
             @Override
             public void handleOnBackPressed() {
                 onBack();
             }
-        });
+        };
+        getOnBackPressedDispatcher().addCallback(this, backCallback);
 
-        if (savedInstanceState == null) {
+        if (savedInstanceState != null) {
+            restoreInstanceState(savedInstanceState);
+        } else {
             Intent intent = getIntent();
             if (intent != null && FileImporter.isIncomingAction(intent)) {
                 handleIncomingIntent(intent);
             } else {
-                loadUrlWithOverlay(BASE_URL);
-            }
-        } else {
-            if (restoredDocumentMissing()) {
-                currentDocumentName = null;
-                fab.setVisibility(View.VISIBLE);
                 loadUrlWithOverlay(BASE_URL);
             }
         }
@@ -159,24 +176,66 @@ public class MainActivity extends ComponentActivity {
         return currentDocumentName != null;
     }
 
+    private void updateBackCallback() {
+        if (backCallback != null) backCallback.setEnabled(isDocumentOpen());
+    }
+
     private void handleIncomingIntent(Intent intent) {
         Uri targetUri = importer.uriFromIntent(intent);
-        if (targetUri != null) {
-            handleSpreadsheetUri(targetUri);
+        if (targetUri == null) {
+            if (!isDocumentOpen()) loadUrlWithOverlay(BASE_URL);
+        } else if (dirty && isDocumentOpen()) {
+            confirmReplaceDocument(targetUri);
         } else {
-            loadUrlWithOverlay(BASE_URL);
+            handleSpreadsheetUri(targetUri);
         }
     }
 
-    private boolean restoredDocumentMissing() {
-        WebBackForwardList list = webView.copyBackForwardList();
-        WebHistoryItem item = list == null ? null : list.getCurrentItem();
-        String url = item == null ? null : Uri.decode(item.getUrl());
-        if (url == null) return false;
-        int cut = url.indexOf("/doc/");
-        if (cut < 0) return false;
-        String id = FileImporter.docIdFromPath(url.substring(cut + 5));
-        return id == null || !importer.docFile(id, "").exists();
+    private void confirmReplaceDocument(Uri uri) {
+        if (isFinishing() || isDestroyed()) return;
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.replace_doc_title))
+                .setMessage(getString(R.string.close_doc_message))
+                .setNegativeButton(getString(R.string.cancel), null)
+                .setPositiveButton(getString(R.string.action_open), (d, w) -> handleSpreadsheetUri(uri))
+                .show();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString(STATE_DOC_ID, currentDocumentId);
+        outState.putString(STATE_DOC_NAME, currentDocumentName);
+        AndroidBridge.SavedFile pending = pendingSaveAs;
+        if (pending != null) {
+            outState.putString(STATE_SAVE_AS_FILE, pending.file.getAbsolutePath());
+            outState.putString(STATE_SAVE_AS_NAME, pending.name);
+            outState.putString(STATE_SAVE_AS_MIME, pending.mime);
+            outState.putBoolean(STATE_SAVE_AS_INITIAL, pendingSaveAsInitial);
+        }
+    }
+
+    private void restoreInstanceState(Bundle state) {
+        String file = state.getString(STATE_SAVE_AS_FILE);
+        if (file != null && new File(file).isFile()) {
+            pendingSaveAs = new AndroidBridge.SavedFile(new File(file),
+                    state.getString(STATE_SAVE_AS_NAME, "Workbook.xlsx"),
+                    state.getString(STATE_SAVE_AS_MIME, Mime.OCTET_STREAM));
+            pendingSaveAsInitial = state.getBoolean(STATE_SAVE_AS_INITIAL);
+        }
+        currentDocumentId = state.getString(STATE_DOC_ID);
+        currentDocumentName = state.getString(STATE_DOC_NAME);
+        reloadCurrent();
+    }
+
+    /** Reopens the current document if its cached copy still exists, else shows home. */
+    private void reloadCurrent() {
+        if (currentDocumentId != null && currentDocumentName != null
+                && importer.docFile(currentDocumentId, currentDocumentName).exists()) {
+            openDocument(currentDocumentId, currentDocumentName);
+        } else {
+            closeDocument();
+        }
     }
 
     private View createLoadingOverlay() {
@@ -188,11 +247,18 @@ public class MainActivity extends ComponentActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             box.setElevation(dpToPx(16));
         }
-        box.addView(new ProgressBar(this));
+        loadingProgress = new ProgressBar(this);
+        box.addView(loadingProgress);
         loadingText = new TextView(this);
         loadingText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        loadingText.setPadding(0, dpToPx(12), 0, 0);
+        loadingText.setGravity(Gravity.CENTER);
+        loadingText.setPadding(dpToPx(24), dpToPx(12), dpToPx(24), 0);
         box.addView(loadingText);
+        retryButton = new Button(this);
+        retryButton.setText(R.string.retry);
+        retryButton.setVisibility(View.GONE);
+        retryButton.setOnClickListener(v -> reloadCurrent());
+        box.addView(retryButton);
         box.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         return box;
@@ -202,11 +268,27 @@ public class MainActivity extends ComponentActivity {
         mainHandler.removeCallbacks(hideOverlay);
         if (loadingOverlay == null) return;
         loadingOverlay.setVisibility(visible ? View.VISIBLE : View.GONE);
-        if (visible) mainHandler.postDelayed(hideOverlay, OVERLAY_TIMEOUT_MS);
+        loadingOverlay.setClickable(visible);
+        loadingProgress.setVisibility(View.VISIBLE);
+        retryButton.setVisibility(View.GONE);
+        if (visible) {
+            mainHandler.postDelayed(hideOverlay, OVERLAY_TIMEOUT_MS);
+        } else {
+            loadingText.setText("");
+        }
+    }
+
+    private void showLoadFailure(String message) {
+        mainHandler.removeCallbacks(hideOverlay);
+        splashHeld = false;
+        loadingText.setText(message);
+        loadingProgress.setVisibility(View.GONE);
+        retryButton.setVisibility(View.VISIBLE);
+        loadingOverlay.setVisibility(View.VISIBLE);
+        loadingOverlay.setClickable(true);
     }
 
     private void loadUrlWithOverlay(String url) {
-        loadingText.setText("");
         setOverlayVisible(true);
         webView.loadUrl(url);
     }
@@ -222,7 +304,6 @@ public class MainActivity extends ComponentActivity {
 
     @Override
     protected void onPause() {
-        paused = true;
         if (webView != null) webView.onPause();
         super.onPause();
     }
@@ -230,7 +311,6 @@ public class MainActivity extends ComponentActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        paused = false;
         if (webView != null) webView.onResume();
     }
 
@@ -243,6 +323,7 @@ public class MainActivity extends ComponentActivity {
         destroyWebView(webView);
         webView = null;
         mainHandler.removeCallbacks(hideOverlay);
+        mainHandler.removeCallbacks(releaseSplash);
         if (bridge != null) bridge.close();
         saveExecutor.shutdown();
         importExecutor.shutdown();
@@ -314,6 +395,7 @@ public class MainActivity extends ComponentActivity {
 
     private void applyThemeColors() {
         getWindow().setBackgroundDrawable(new ColorDrawable(getColor(R.color.window_background)));
+        if (webView != null) webView.setBackgroundColor(getColor(R.color.window_background));
         if (loadingOverlay != null) loadingOverlay.setBackgroundColor(getColor(R.color.window_background));
         if (loadingText != null) loadingText.setTextColor(getColor(R.color.overlay_text));
         if (fab != null) {
@@ -340,6 +422,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void configureWebView() {
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -367,14 +450,14 @@ public class MainActivity extends ComponentActivity {
             return false;
         });
 
-        bridge = new AndroidBridge(this, webView, fileSaver, this::onDocumentOpened, saveListener,
-                () -> setOverlayVisible(false));
+        bridge = new AndroidBridge(this, webView, fileSaver, saveExecutor, hostListener, saveListener);
         webView.addJavascriptInterface(bridge, "GridCraftAndroid");
 
         assetLoader = new WebViewAssetLoader.Builder()
                 .setDomain(HOST)
                 .setHttpAllowed(false)
                 .addPathHandler("/doc/", this::handleDocument)
+                .addPathHandler("/android/", path -> openAsset("android/" + path))
                 .addPathHandler("/", path -> openAsset("web/" + (path.isEmpty() ? "index.html" : path)))
                 .build();
 
@@ -408,6 +491,23 @@ public class MainActivity extends ComponentActivity {
             }
 
             @Override
+            public void onPageFinished(WebView view, String url) {
+                if (!importing && loadingOverlay.getVisibility() == View.VISIBLE
+                        && retryButton.getVisibility() != View.VISIBLE) {
+                    mainHandler.removeCallbacks(hideOverlay);
+                    mainHandler.postDelayed(hideOverlay, PAGE_FINISHED_FALLBACK_MS);
+                }
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request.isForMainFrame()) {
+                    Log.e(TAG, "Main frame load failed: " + error.getDescription());
+                    showLoadFailure(getString(R.string.app_load_failed));
+                }
+            }
+
+            @Override
             public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
                 Log.e(TAG, "Renderer process gone");
                 if (view != webView) return true;
@@ -435,13 +535,14 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void recoverFromRendererLoss() {
+        if (bridge != null) bridge.close();
         destroyWebView(webView);
         webView = createWebView();
         rootLayout.addView(webView, 0);
         configureWebView();
-        currentDocumentName = null;
-        fab.setVisibility(View.VISIBLE);
-        loadUrlWithOverlay(BASE_URL);
+        applyThemeColors();
+        dirty = false;
+        reloadCurrent();
         Toast.makeText(this, getString(R.string.renderer_reloaded), Toast.LENGTH_LONG).show();
     }
 
@@ -470,12 +571,21 @@ public class MainActivity extends ComponentActivity {
 
     private WebResourceResponse openAsset(String assetPath) {
         try {
-            return new WebResourceResponse(Mime.fromFileName(assetPath), "UTF-8", 200, "OK",
-                    noCacheHeaders(), getAssets().open(assetPath));
+            String mime = Mime.fromFileName(assetPath);
+            // Hashed web bundle files never change under the same name; host page and html may.
+            boolean volatileAsset = assetPath.startsWith("android/") || assetPath.endsWith(".html");
+            return new WebResourceResponse(mime, encodingFor(mime), 200, "OK",
+                    volatileAsset ? noCacheHeaders() : Collections.emptyMap(), getAssets().open(assetPath));
         } catch (IOException e) {
             Log.w(TAG, "Asset not found: " + assetPath);
             return notFound();
         }
+    }
+
+    private static String encodingFor(String mime) {
+        boolean text = mime.startsWith("text/") || mime.contains("javascript")
+                || mime.contains("json") || mime.contains("svg");
+        return text ? "UTF-8" : null;
     }
 
     private WebResourceResponse handleDocument(String path) {
@@ -483,7 +593,7 @@ public class MainActivity extends ComponentActivity {
         File cachedFile = id == null ? null : importer.docFile(id, path);
         if (cachedFile != null && cachedFile.exists()) {
             try {
-                return new WebResourceResponse(Mime.fromFileName(path), "UTF-8", 200, "OK",
+                return new WebResourceResponse(Mime.fromFileName(path), null, 200, "OK",
                         noCacheHeaders(), new FileInputStream(cachedFile));
             } catch (IOException e) {
                 Log.e(TAG, "Cannot stream cached document", e);
@@ -493,23 +603,38 @@ public class MainActivity extends ComponentActivity {
     }
 
     private static Map<String, String> noCacheHeaders() {
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Cache-Control", "no-cache");
-        headers.put("Access-Control-Allow-Origin", "*");
-        headers.put("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        headers.put("Access-Control-Allow-Headers", "*");
-        return headers;
+        return Collections.singletonMap("Cache-Control", "no-cache");
     }
 
     private static WebResourceResponse notFound() {
         return new WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", null, null);
     }
 
-    private void onDocumentOpened(boolean opened) {
-        if (fab != null) {
-            fab.setVisibility(opened ? View.GONE : View.VISIBLE);
+    private final AndroidBridge.HostListener hostListener = new AndroidBridge.HostListener() {
+        @Override
+        public void onReady() {
+            splashHeld = false;
+            setOverlayVisible(false);
         }
-    }
+
+        @Override
+        public void onFailed(String error) {
+            Log.e(TAG, "App failed to start: " + error);
+            showLoadFailure(getString(R.string.app_load_failed));
+        }
+
+        @Override
+        public void onDocumentOpened(boolean opened) {
+            if (fab != null) {
+                fab.setVisibility(opened ? View.GONE : View.VISIBLE);
+            }
+        }
+
+        @Override
+        public void onDirty(boolean value) {
+            dirty = value;
+        }
+    };
 
     private void openDirectSpreadsheetPicker() {
         if (!launchPicker(directPickerLauncher, SPREADSHEET_MIMES, false)) {
@@ -518,8 +643,9 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void handleSpreadsheetUri(Uri uri) {
-        loadingText.setText(getString(R.string.opening_spreadsheet));
+        importing = true;
         setOverlayVisible(true);
+        loadingText.setText(getString(R.string.opening_spreadsheet));
         importExecutor.execute(() -> {
             try {
                 String name = importer.displayName(uri);
@@ -529,6 +655,7 @@ public class MainActivity extends ComponentActivity {
             } catch (IOException | RuntimeException e) {
                 Log.e(TAG, "Error handling spreadsheet URI: " + uri, e);
                 runOnUiThread(() -> {
+                    importing = false;
                     setOverlayVisible(false);
                     if (webView != null && webView.getUrl() == null) loadUrlWithOverlay(BASE_URL);
                     Toast.makeText(this, getString(R.string.open_spreadsheet_failed), Toast.LENGTH_SHORT).show();
@@ -538,14 +665,33 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void onImported(String id, String name) {
+        importing = false;
         if (isFinishing() || isDestroyed() || webView == null) return;
-        currentDocumentName = name;
-        webView.loadUrl(BASE_URL + "?file=/doc/" + id + "/" + Uri.encode(name) + "&t=" + System.currentTimeMillis());
-        if (fab != null) {
-            fab.setVisibility(View.GONE);
-        }
+        openDocument(id, name);
         getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
         Toast.makeText(this, getString(R.string.opening_spreadsheet_name, name), Toast.LENGTH_SHORT).show();
+    }
+
+    private void openDocument(String id, String name) {
+        currentDocumentId = id;
+        currentDocumentName = name;
+        dirty = false;
+        updateBackCallback();
+        if (fab != null) fab.setVisibility(View.GONE);
+        String file = Uri.encode("/doc/" + id + "/" + Uri.encode(name));
+        loadUrlWithOverlay(BASE_URL + "?file=" + file + "&t=" + System.currentTimeMillis());
+    }
+
+    private void closeDocument() {
+        currentDocumentId = null;
+        currentDocumentName = null;
+        dirty = false;
+        updateBackCallback();
+        if (fab != null) fab.setVisibility(View.VISIBLE);
+        if (webView != null) {
+            loadUrlWithOverlay(BASE_URL);
+            webView.clearHistory();
+        }
     }
 
     private final AndroidBridge.SaveListener saveListener = new AndroidBridge.SaveListener() {
@@ -560,10 +706,26 @@ public class MainActivity extends ComponentActivity {
         }
 
         @Override
+        public void onPrint(AndroidBridge.SavedFile file) {
+            runOnUiThread(() -> printPdf(file));
+        }
+
+        @Override
         public void onFailed(String name, String message) {
             runOnUiThread(() -> onSaveFailed(name, message));
         }
     };
+
+    private void printPdf(AndroidBridge.SavedFile file) {
+        if (isFinishing() || isDestroyed()) return;
+        PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
+        if (printManager == null) {
+            Toast.makeText(this, getString(R.string.print_failed), Toast.LENGTH_LONG).show();
+            return;
+        }
+        String job = currentDocumentName != null ? currentDocumentName : getString(R.string.app_name);
+        printManager.print(job, new PdfPrintAdapter(file.file, job), null);
+    }
 
     private void onSaveSucceeded(AndroidBridge.SavedFile file, String name, boolean inDownloads) {
         if (isFinishing() || isDestroyed()) return;
@@ -581,6 +743,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void onSaveFailed(String name, String message) {
+        if (isFinishing() || isDestroyed()) return;
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
@@ -594,6 +757,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void launchSaveAs(AndroidBridge.SavedFile file, boolean initial) {
+        if (isFinishing() || isDestroyed()) return;
         pendingSaveAs = file;
         pendingSaveAsInitial = initial;
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
@@ -630,30 +794,20 @@ public class MainActivity extends ComponentActivity {
         });
     }
 
+    /** Only called while a document is open (the callback is disabled otherwise). */
     private void onBack() {
-        if (isDocumentOpen() && webView != null) {
-            webView.evaluateJavascript(
-                    "(window.handleAndroidBack ? window.handleAndroidBack() : false)",
-                    value -> {
-                        if (!"true".equals(value)) confirmCloseDocument();
-                    });
-            return;
-        }
-
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - backPressedTime < 2000) {
-            if (exitToast != null) {
-                exitToast.cancel();
+        if (webView == null) return;
+        webView.evaluateJavascript("window.gcBack && window.gcBack()", null);
+        long now = SystemClock.uptimeMillis();
+        if (backPressedTime != 0 && now - backPressedTime < BACK_CLOSE_WINDOW_MS) {
+            backPressedTime = 0;
+            if (dirty) {
+                confirmCloseDocument();
+            } else {
+                closeDocument();
             }
-            finish();
         } else {
-            backPressedTime = currentTime;
-            if (exitToast != null) {
-                exitToast.cancel();
-            }
-            exitToast = Toast.makeText(this, getString(R.string.exit_hint), Toast.LENGTH_SHORT);
-            exitToast.show();
-            getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            backPressedTime = now;
         }
     }
 
@@ -663,16 +817,7 @@ public class MainActivity extends ComponentActivity {
                 .setTitle(getString(R.string.close_doc_title))
                 .setMessage(getString(R.string.close_doc_message))
                 .setNegativeButton(getString(R.string.cancel), null)
-                .setPositiveButton(getString(R.string.close), (d, w) -> {
-                    currentDocumentName = null;
-                    if (fab != null) {
-                        fab.setVisibility(View.VISIBLE);
-                    }
-                    if (webView != null) {
-                        webView.loadUrl(BASE_URL);
-                        webView.clearHistory();
-                    }
-                })
+                .setPositiveButton(getString(R.string.close), (d, w) -> closeDocument())
                 .show();
     }
 }

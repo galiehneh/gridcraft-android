@@ -29,4 +29,8 @@
     <string name="close_doc_message">Perubahan yang belum disimpan akan hilang.</string>
     <string name="cancel">Batal</string>
     <string name="close">Tutup</string>
+    <string name="retry">Muat ulang</string>
+    <string name="app_load_failed">GridCraft gagal dimulai.</string>
+    <string name="replace_doc_title">Buka file lain?</string>
+    <string name="print_failed">Pencetakan tidak tersedia</string>
 </resources>

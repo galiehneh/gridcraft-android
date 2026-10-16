@@ -20,8 +20,8 @@ android {
         applicationId = "com.galiehneh.gridcraft"
         minSdk = 24
         targetSdk = 35
-        versionCode = 20261016
-        versionName = "2026.10.16"
+        versionCode = 20261017
+        versionName = "2026.10.16.1"
     }
 
     signingConfigs {

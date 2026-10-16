@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GridCraft</string>
+    <string name="open_spreadsheet">Open Spreadsheet</string>
+    <string name="choose_file">Choose file</string>
+    <string name="no_picker_app">No file picker app available</string>
+    <string name="opening_spreadsheet">Opening spreadsheet…</string>
+    <string name="opening_spreadsheet_name">Opening spreadsheet: %1$s</string>
+    <string name="open_spreadsheet_failed">Failed to process the spreadsheet file</string>
+    <string name="saved_title">Saved</string>
+    <string name="saved_message">Saved: %1$s</string>
+    <string name="saved_location_downloads">Location: Downloads folder</string>
+    <string name="action_open">Open</string>
+    <string name="action_share">Share</string>
+    <string name="action_save_as">Save as…</string>
+    <string name="no_handler_app">No app can handle this file</string>
+    <string name="no_save_location_app">No app available to choose a save location</string>
+    <string name="save_cancelled">Save cancelled</string>
+    <string name="save_failed">Failed to save the file</string>
+    <string name="save_prepare_failed">Could not prepare temporary storage</string>
+    <string name="save_write_failed">Failed to write the file (storage full?)</string>
+    <string name="save_finish_failed">Failed to finish the file</string>
+    <string name="save_limit_exceeded">The file is too large to save</string>
+    <string name="save_too_many">Too many saves in progress</string>
+    <string name="save_downloads_failed">Failed to save to the Downloads folder</string>
+    <string name="renderer_reloaded">The view was reloaded because the device ran out of memory. Unsaved documents were lost.</string>
+    <string name="exit_hint">Press again to exit</string>
+    <string name="close_doc_title">Close workbook?</string>
+    <string name="close_doc_message">Unsaved changes will be lost.</string>
+    <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
+</resources>

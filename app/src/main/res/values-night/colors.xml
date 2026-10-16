@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="window_background">#19191c</color>
+    <color name="overlay_text">#cfcfd4</color>
+    <color name="fab_background">#5cc587</color>
+    <color name="fab_text">#0b1f14</color>
+</resources>

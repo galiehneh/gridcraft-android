@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GridCraft</string>
+    <string name="open_spreadsheet">Buka Lembar Sebar</string>
+    <string name="choose_file">Pilih berkas</string>
+    <string name="no_picker_app">Tidak ada aplikasi pemilih berkas</string>
+    <string name="opening_spreadsheet">Membuka lembar sebar…</string>
+    <string name="opening_spreadsheet_name">Membuka lembar sebar: %1$s</string>
+    <string name="open_spreadsheet_failed">Gagal memproses berkas lembar sebar</string>
+    <string name="saved_title">Tersimpan</string>
+    <string name="saved_message">Tersimpan: %1$s</string>
+    <string name="saved_location_downloads">Lokasi: folder Download</string>
+    <string name="action_open">Buka</string>
+    <string name="action_share">Bagikan</string>
+    <string name="action_save_as">Simpan sebagai…</string>
+    <string name="no_handler_app">Tidak ada aplikasi yang dapat menangani berkas ini</string>
+    <string name="no_save_location_app">Tidak ada aplikasi untuk memilih lokasi simpan</string>
+    <string name="save_cancelled">Penyimpanan dibatalkan</string>
+    <string name="save_failed">Gagal menyimpan berkas</string>
+    <string name="save_prepare_failed">Tidak dapat menyiapkan penyimpanan sementara</string>
+    <string name="save_write_failed">Gagal menulis berkas (penyimpanan penuh?)</string>
+    <string name="save_finish_failed">Gagal menyelesaikan berkas</string>
+    <string name="save_limit_exceeded">Berkas terlalu besar untuk disimpan</string>
+    <string name="save_too_many">Terlalu banyak penyimpanan yang berjalan</string>
+    <string name="save_downloads_failed">Gagal menyimpan ke folder Download</string>
+    <string name="renderer_reloaded">Tampilan dimuat ulang karena kehabisan memori. Dokumen yang belum disimpan hilang.</string>
+    <string name="exit_hint">Tekan sekali lagi untuk keluar</string>
+    <string name="close_doc_title">Tutup lembar kerja?</string>
+    <string name="close_doc_message">Perubahan yang belum disimpan akan hilang.</string>
+    <string name="cancel">Batal</string>
+    <string name="close">Tutup</string>
+</resources>

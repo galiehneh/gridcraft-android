@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.GridCraft" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#f3f3f3</item>
+        <item name="android:navigationBarColor">#f3f3f3</item>
+        <item name="android:statusBarColor">#107c41</item>
+    </style>
+</resources>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>GridCraft</title>
+  <link rel="icon" href="./gridcraft-45f84b7721cb79a9.ico" integrity="sha384-FzBCWcgv5VqBLEPSBvyC78gOs2HMh3hKu2LSLSXU01NgL5yKLk/nHdINuu0Ztky1"/>
+  
+<script type="module">
+import init, * as bindings from './gridcraft-web-e00e0030c34d9c5.js';
+const wasm = await init({ module_or_path: './gridcraft-web-e00e0030c34d9c5_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f3f3f3; }
+    #gridcraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+    #gridcraft_loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #555; font: 14px system-ui, sans-serif; pointer-events: none; }
+  </style>
+  <script>
+    (function() {
+      const origClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function() {
+        if (this.href && this.href.startsWith("blob:") && window.GridCraftAndroid) {
+          const href = this.href;
+          const filename = this.download || "workbook.xlsx";
+          fetch(href)
+            .then(function(res) { return res.blob(); })
+            .then(function(blob) {
+              const reader = new FileReader();
+              reader.onloadend = function() {
+                if (window.GridCraftAndroid && window.GridCraftAndroid.saveBlob) {
+                  window.GridCraftAndroid.saveBlob(reader.result, filename);
+                }
+              };
+              reader.readAsDataURL(blob);
+            })
+            .catch(function(err) {
+              console.error("Blob download interception error:", err);
+            });
+        }
+        return origClick.apply(this, arguments);
+      };
+
+      window.handleAndroidBack = function() {
+        const ev = new KeyboardEvent('keydown', {
+          key: 'Escape',
+          code: 'Escape',
+          keyCode: 27,
+          which: 27,
+          bubbles: true
+        });
+        window.dispatchEvent(ev);
+        document.dispatchEvent(ev);
+      };
+
+      document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+      }, false);
+
+      document.addEventListener('DOMContentLoaded', function() {
+        const canvas = document.getElementById('gridcraft_canvas');
+        if (canvas) {
+          canvas.setAttribute('tabindex', '0');
+        }
+      });
+    })();
+  </script>
+<link rel="modulepreload" href="./gridcraft-web-e00e0030c34d9c5.js" crossorigin="anonymous" integrity="sha384-pKNsm7JDpL2Elhs7pVwFFr4Fq7nrk7xiN6uHkDM0jvIAGz3tEtderqVnmXERwayL"><link rel="preload" href="./gridcraft-web-e00e0030c34d9c5_bg.wasm" crossorigin="anonymous" integrity="sha384-YSSCXrKtn9whS5rm6WZrY3IA9dc+kwNSbCiDZeUjN1JuQktwj6Cnq5i7Cqm6H+wm" as="fetch" type="application/wasm"></head>
+<body>
+  <canvas id="gridcraft_canvas"></canvas>
+  <div id="gridcraft_loading">Loading GridCraft&hellip;</div>
+</body>
+</html>

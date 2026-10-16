@@ -1,0 +1,13 @@
+[versions]
+activity = "1.10.1"
+core = "1.15.0"
+webkit = "1.13.0"
+coreSplashscreen = "1.0.1"
+junit = "4.13.2"
+
+[libraries]
+androidx-activity = { module = "androidx.activity:activity", version.ref = "activity" }
+androidx-core = { module = "androidx.core:core", version.ref = "core" }
+androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
+junit = { module = "junit:junit", version.ref = "junit" }

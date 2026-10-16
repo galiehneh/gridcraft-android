@@ -81,4 +81,32 @@ public class MimeTest {
         assertArrayEquals(new String[]{"*/*"}, Mime.acceptToMimeTypes(new String[]{".weird"}));
         assertArrayEquals(new String[]{"text/csv", XLSX}, Mime.acceptToMimeTypes(new String[]{".csv", ".xlsx"}));
     }
+
+    @Test
+    public void safeExtensionOf_onlyAllowlisted() {
+        assertEquals("xlsx", Mime.safeExtensionOf("a/Book.XLSX"));
+        assertEquals("csv", Mime.safeExtensionOf("x.csv"));
+        assertNull(Mime.safeExtensionOf("x.html"));
+        assertNull(Mime.safeExtensionOf("x.js"));
+        assertNull(Mime.safeExtensionOf("x.svg"));
+        assertNull(Mime.safeExtensionOf("noext"));
+        assertNull(Mime.safeExtensionOf(null));
+    }
+
+    @Test
+    public void isSafeAssetPath_rejectsTraversalAndBackslash() {
+        assertTrue(Mime.isSafeAssetPath("web/index.html"));
+        assertTrue(Mime.isSafeAssetPath("web/gridcraft-web-1_bg.wasm"));
+        assertFalse(Mime.isSafeAssetPath("web/../x"));
+        assertFalse(Mime.isSafeAssetPath("..\\x"));
+        assertFalse(Mime.isSafeAssetPath("a\\b"));
+        assertFalse(Mime.isSafeAssetPath(null));
+    }
+
+    @Test
+    public void sanitizeFileName_stripsInvisibleFormatChars() {
+        assertEquals("evilgpj.exe", Mime.sanitizeFileName("evil\u202Egpj.exe"));
+        assertEquals("ab.xlsx", Mime.sanitizeFileName("a\u200Bb\uFEFF.xlsx"));
+        assertEquals(Mime.DEFAULT_FILE_NAME, Mime.sanitizeFileName("\u202E\u200B"));
+    }
 }

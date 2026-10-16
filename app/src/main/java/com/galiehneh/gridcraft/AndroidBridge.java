@@ -28,6 +28,8 @@ class AndroidBridge {
     static final int MAX_CHUNK_BASE64_CHARS = 4 * 1024 * 1024;
     static final long MAX_SESSION_BYTES = 1L << 30;
     static final int MAX_SESSIONS = 4;
+    static final int MAX_BLOB_DATA_URL_CHARS = 64 * 1024 * 1024;
+    static final long SESSION_IDLE_MS = 5 * 60 * 1000L;
     private static final int MAX_RETAINED = 5;
     private static final long RETAIN_MS = 60 * 60 * 1000L;
 
@@ -53,15 +55,27 @@ class AndroidBridge {
         return keep;
     }
 
+    /** True when a session untouched since {@code lastActivity} has outlived {@link #SESSION_IDLE_MS}. */
+    static boolean isIdleExpired(long lastActivity, long now) {
+        return now - lastActivity > SESSION_IDLE_MS;
+    }
+
     static final class SavedFile {
         final File file;
         final String name;
         final String mime;
+        /** Source document captured when the save started; null when none (or restored state). */
+        final Source source;
 
         SavedFile(File file, String name, String mime) {
+            this(file, name, mime, null);
+        }
+
+        SavedFile(File file, String name, String mime, Source source) {
             this.file = file;
             this.name = name;
             this.mime = mime;
+            this.source = source;
         }
     }
 
@@ -75,6 +89,10 @@ class AndroidBridge {
 
     /** Save callbacks; may be invoked on any thread. */
     interface SaveListener {
+        /** The open document's source right now; snapshotted when a save starts. */
+        Source currentSource();
+        /** A page-initiated save has started streaming (not a print). */
+        void onSaveBegun();
         void onSaved(SavedFile file, String finalName);
         /** Tries to overwrite the document's source file; true when handled (success UI included). */
         boolean onSaveInPlace(SavedFile file);
@@ -89,15 +107,18 @@ class AndroidBridge {
         final String name;
         final String mime;
         final boolean print;
+        final Source source;
         final FileOutputStream out;
         long written;
+        volatile long lastActivity = System.currentTimeMillis();
 
-        Session(File dir, File file, String name, String mime, boolean print) throws IOException {
+        Session(File dir, File file, String name, String mime, boolean print, Source source) throws IOException {
             this.dir = dir;
             this.file = file;
             this.name = name;
             this.mime = mime;
             this.print = print;
+            this.source = source;
             this.out = new FileOutputStream(file);
         }
     }
@@ -166,6 +187,12 @@ class AndroidBridge {
     @JavascriptInterface
     public void saveBlob(String dataUrl, String filename) {
         if (dataUrl == null) return;
+        if (dataUrl.length() > MAX_BLOB_DATA_URL_CHARS) {
+            saveListener.onFailed(filename, activity.getString(R.string.save_limit_exceeded));
+            return;
+        }
+        Source source = saveListener.currentSource();
+        saveListener.onSaveBegun();
         runSave(() -> {
             try {
                 String[] safe = Mime.sanitizeForSave(null, filename);
@@ -175,13 +202,13 @@ class AndroidBridge {
                 byte[] bytes = Base64.decode(comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl, Base64.DEFAULT);
                 cleanupOldOutputs();
                 File dir = new File(new File(activity.getCacheDir(), OUT_DIR), UUID.randomUUID().toString());
-                if (!dir.mkdirs()) throw new IOException("Cannot create " + dir);
                 retain(dir.getName());
+                if (!dir.mkdirs()) throw new IOException("Cannot create " + dir);
                 File file = new File(dir, name);
                 try (FileOutputStream fos = new FileOutputStream(file)) {
                     fos.write(bytes);
                 }
-                deliver(new SavedFile(file, name, mime));
+                deliver(new SavedFile(file, name, mime, source));
             } catch (IOException | RuntimeException e) {
                 Log.e(TAG, "saveBlob failed", e);
                 saveListener.onFailed(filename, activity.getString(R.string.save_failed));
@@ -220,6 +247,7 @@ class AndroidBridge {
     }
 
     private String begin(String name, String mime, boolean print) {
+        expireIdleSessions();
         if (sessions.size() >= MAX_SESSIONS) {
             saveListener.onFailed(name, activity.getString(R.string.save_too_many));
             return "";
@@ -230,7 +258,8 @@ class AndroidBridge {
             File dir = new File(new File(activity.getCacheDir(), OUT_DIR), id);
             if (!dir.mkdirs()) throw new IOException("Cannot create " + dir);
             File file = new File(dir, print ? "print.pdf" : name);
-            sessions.put(id, new Session(dir, file, name, mime, print));
+            sessions.put(id, new Session(dir, file, name, mime, print, saveListener.currentSource()));
+            if (!print) saveListener.onSaveBegun();
             return id;
         } catch (IOException | RuntimeException e) {
             Log.e(TAG, "beginSave failed", e);
@@ -243,6 +272,7 @@ class AndroidBridge {
     public boolean appendChunk(String id, String base64) {
         Session s = id == null ? null : sessions.get(id);
         if (s == null || base64 == null) return false;
+        s.lastActivity = System.currentTimeMillis();
         if (base64.length() > MAX_CHUNK_BASE64_CHARS) {
             fail(id, activity.getString(R.string.save_limit_exceeded));
             return false;
@@ -272,7 +302,7 @@ class AndroidBridge {
         runSave(() -> {
             try {
                 s.out.close();
-                SavedFile saved = new SavedFile(s.file, s.name, s.mime);
+                SavedFile saved = new SavedFile(s.file, s.name, s.mime, s.source);
                 if (s.print) {
                     saveListener.onPrint(saved);
                 } else {
@@ -292,6 +322,24 @@ class AndroidBridge {
         if (s == null) return;
         closeQuietly(s);
         deleteRecursive(s.dir);
+    }
+
+    private void expireIdleSessions() {
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, Session> e : sessions.entrySet()) {
+            if (isIdleExpired(e.getValue().lastActivity, now) && sessions.remove(e.getKey(), e.getValue())) {
+                closeQuietly(e.getValue());
+                deleteRecursive(e.getValue().dir);
+            }
+        }
+    }
+
+    /** Aborts all in-flight sessions and deletes every output (finished ones included). */
+    void clearOutputs() {
+        close();
+        File[] dirs = new File(activity.getCacheDir(), OUT_DIR).listFiles();
+        if (dirs == null) return;
+        for (File dir : dirs) deleteRecursive(dir);
     }
 
     void close() {

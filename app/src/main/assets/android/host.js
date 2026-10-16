@@ -52,7 +52,9 @@
       var original = w.URL.createObjectURL;
       w.URL.createObjectURL = function (obj) {
         if (obj && obj.type === PDF_MIME && typeof obj.arrayBuffer === 'function') {
-          obj.arrayBuffer().then(function (buf) { relay('print.pdf', new Uint8Array(buf), true); });
+          obj.arrayBuffer()
+            .then(function (buf) { relay('print.pdf', new Uint8Array(buf), true); })
+            .catch(function (err) { console.error('print blob read failed', err); });
         }
         return original.apply(this, arguments);
       };

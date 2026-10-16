@@ -16,6 +16,11 @@ android {
     namespace = "com.galiehneh.gridcraft"
     compileSdk = 36
 
+    lint {
+        // versionCode is YYYYMMDDNN by project convention
+        disable += "HighAppVersionCode"
+    }
+
     defaultConfig {
         applicationId = "com.galiehneh.gridcraft"
         minSdk = 24

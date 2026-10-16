@@ -20,6 +20,11 @@
     <string name="save_too_many">Too many saves in progress</string>
     <string name="save_downloads_failed">Failed to save to the Downloads folder</string>
     <string name="renderer_reloaded">The view was reloaded because the device ran out of memory. Unsaved documents were lost.</string>
+    <string name="unsaved_lost">Unsaved changes were lost because the app was restarted.</string>
+    <string name="overwrite_title">Overwrite original file?</string>
+    <string name="overwrite_message">Save changes over %1$s? Choose Save copy to keep the original and save to Downloads instead.</string>
+    <string name="overwrite">Overwrite</string>
+    <string name="save_copy">Save copy</string>
     <string name="close_doc_title">Close workbook?</string>
     <string name="close_doc_message">Unsaved changes will be lost.</string>
     <string name="cancel">Cancel</string>

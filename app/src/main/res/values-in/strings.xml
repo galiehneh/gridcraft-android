@@ -20,6 +20,11 @@
     <string name="save_too_many">Terlalu banyak penyimpanan yang berjalan</string>
     <string name="save_downloads_failed">Gagal menyimpan ke folder Download</string>
     <string name="renderer_reloaded">Tampilan dimuat ulang karena kehabisan memori. Dokumen yang belum disimpan hilang.</string>
+    <string name="unsaved_lost">Perubahan yang belum disimpan hilang karena aplikasi dimulai ulang.</string>
+    <string name="overwrite_title">Timpa berkas asli?</string>
+    <string name="overwrite_message">Simpan perubahan ke %1$s? Pilih Simpan salinan untuk mempertahankan berkas asli dan menyimpan ke Downloads.</string>
+    <string name="overwrite">Timpa</string>
+    <string name="save_copy">Simpan salinan</string>
     <string name="close_doc_title">Tutup lembar kerja?</string>
     <string name="close_doc_message">Perubahan yang belum disimpan akan hilang.</string>
     <string name="cancel">Batal</string>

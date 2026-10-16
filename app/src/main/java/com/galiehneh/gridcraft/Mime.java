@@ -48,6 +48,17 @@ final class Mime {
         return isValidExtension(ext) ? ext : null;
     }
 
+    /** Like {@link #extensionOf} but null unless the extension is in the save allowlist. */
+    static String safeExtensionOf(String name) {
+        String ext = extensionOf(name);
+        return ext != null && SAFE_EXTENSIONS.contains(ext) ? ext : null;
+    }
+
+    /** False for asset paths that could escape the asset root ("..", backslash). */
+    static boolean isSafeAssetPath(String path) {
+        return path != null && !path.contains("..") && path.indexOf('\\') < 0;
+    }
+
     /** Extension for a MIME type (parameters ignored, case-insensitive); null when unknown. */
     static String extensionForMime(String mime) {
         if (mime == null) return null;
@@ -164,10 +175,10 @@ final class Mime {
         return clean;
     }
 
-    /** Strips path separators and control characters; falls back to Workbook.xlsx when empty. */
+    /** Strips path separators, control and invisible format characters; falls back to Workbook.xlsx when empty. */
     static String sanitizeFileName(String name) {
         if (name == null) return DEFAULT_FILE_NAME;
-        String cleaned = name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+        String cleaned = name.replaceAll("\\p{Cf}", "").replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
         while (cleaned.startsWith(".")) cleaned = cleaned.substring(1);
         if (cleaned.length() > MAX_NAME_LENGTH) cleaned = cleaned.substring(cleaned.length() - MAX_NAME_LENGTH);
         if (cleaned.isEmpty() || cleaned.equals(".") || cleaned.equals("..")) {

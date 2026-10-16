@@ -34,11 +34,19 @@ Porting & Packaging dari upstream [storytold/gridcraft](https://github.com/story
 
 ---
 
+## Arsitektur Host (Android)
+
+`app/src/main/assets/android/host.html` + `host.js` membungkus app web dalam iframe (`index.html?host=parent`) dan meneruskan event `gridcraft:ready/failed/dirty/save` ke `GridCraftAndroid` (status siap, dirty, simpan chunked, print PDF). Save menimpa file asli (dengan konfirmasi sekali per dokumen) bila izin tulis ada; selain itu ke Downloads / Simpan sebagai.
+
+## Keterbatasan yang Diketahui
+
+Butuh rebuild wasm (upstream), belum dikerjakan: drag-select mode edit di ponsel, pinch tanpa hover, ukuran touch target ribbon, menu konteks long-press, bottom sheet panel, autosave snapshot, Copy/Cut dari menu native.
+
 ## Spesifikasi Build
 
 - **Application ID:** `com.galiehneh.gridcraft`
-- **Version Name:** `2026.10.16`
-- **Version Code:** `20261016`
+- **Version Name:** `2026.10.17`
+- **Version Code:** `2026101701`
 - **Minimum SDK:** Android 7.0 (API 24)
 - **Target SDK:** Android 15 (API 35)
 - **Compile SDK:** 35

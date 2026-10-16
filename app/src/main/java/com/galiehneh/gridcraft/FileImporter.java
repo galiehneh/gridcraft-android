@@ -52,12 +52,12 @@ class FileImporter {
     }
 
     /**
-     * Cache file for a document. Extension comes from name; when name has no valid extension,
+     * Cache file for a document. Extension comes from name; when name has no allowlisted extension,
      * an existing {@code <id>.*} file is used, else xlsx.
      */
     File docFile(String id, String name) {
         File dir = new File(context.getCacheDir(), DOCS_DIR);
-        String ext = Mime.extensionOf(name);
+        String ext = Mime.safeExtensionOf(name);
         if (ext == null) {
             File[] matches = dir.listFiles((d, n) -> n.startsWith(id + "."));
             if (matches != null && matches.length > 0) return matches[0];
@@ -185,6 +185,15 @@ class FileImporter {
         if (files == null) return;
         for (File f : files) {
             if (!f.getName().startsWith(keepId) && !f.delete()) f.deleteOnExit();
+        }
+    }
+
+    /** Deletes every cached document. */
+    void deleteAll() {
+        File[] files = new File(context.getCacheDir(), DOCS_DIR).listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (!f.delete()) f.deleteOnExit();
         }
     }
 
